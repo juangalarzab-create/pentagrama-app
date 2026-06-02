@@ -7,7 +7,7 @@
 <style>
   :root{
     --panel:#0b1220; --panel2:#111827; --accent:#2563eb; --white:#fff;
-    --toolbar-h:46px; --hint-h:0px;
+    --toolbar-h:46px; --hint-h:26px;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{height:100%; margin:0; font-family:Arial, Helvetica, sans-serif; background:#cfd3dc; color:#111827; overflow:hidden;}
@@ -49,7 +49,6 @@
   .object{cursor:grab; pointer-events:all;}
   .object:active{cursor:grabbing;}
   .selection{pointer-events:none;}
-  .selection circle{pointer-events:all; cursor:pointer;}
   .selection rect{fill:rgba(37,99,235,.07);stroke:#2563eb;stroke-width:2;stroke-dasharray:10 8;vector-effect:non-scaling-stroke;}
   .selection circle.resize{fill:#2563eb;stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke;}
   .selection circle.rotate{fill:#16a34a;stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke;}
@@ -115,14 +114,14 @@
       <button id="focusMode" title="Ver solo hoja completa y pasar hojas con el dedo">Pantalla</button>
     </div>
     <div class="toolgroup">
-      <button id="clearPage" class="danger" title="Borrar la hoja actual">Limpiar</button>
       <button id="undo" title="Deshacer">↶</button>
+      <button id="clearPage" class="danger" title="Borrar la hoja actual">Limpiar</button>
       <button id="exportPng" class="primary" title="Exportar hoja actual como PNG">PNG</button>
       <button id="exportPdf" class="primary" title="Exportar hoja actual como PDF">PDF</button>
       <button id="exportPdfAll" class="primary" title="Exportar todas las hojas como PDF">PDF todo</button>
     </div>
   </div>
-  
+  <div class="hint" id="hint">El dedo no dibuja ni coloca símbolos: sirve para desmarcar y deslizar hojas. Para marcar usa lápiz táctil o mouse. En texto sí puedes tocar para escribir.</div>
   <div class="workspace" id="workspace">
     <div class="sheetWrap" id="sheetWrap">
       <div class="sheet" id="sheet">
@@ -148,7 +147,7 @@
   const BASE_NOTE = 22;
   const BASE_FONT = 25;
   const STAFF_SPACES = [140.75,165.5,190.5,215.25,347.5,372.25,396.75,421.5,560.0,585.0,609.75,634.25,782.75,807.25,832.0,856.75,991.0,1015.5,1040.5,1065.5,1194.75,1220.0,1245.25,1269.5,1410.0,1434.75,1459.75,1484.5,1613.0,1638.0,1662.75,1687.25,1820.75,1845.25,1870.25,1895.0];
-  const STAFF_LINES = STAFF_SPACES.map(s => s - 24.8);
+  const STAFF_LINES = STAFF_SPACES.map(s => s - 12.4);
   const STORAGE_KEY = 'pentagrama_v4_pages';
   const STORAGE_PAGE = 'pentagrama_v4_current_page';
 
@@ -163,7 +162,7 @@
   const sizeInput = document.getElementById('size');
   const sizeText = document.getElementById('sizeText');
   const snapInput = document.getElementById('snap');
-  const hint = {textContent:''};
+  const hint = document.getElementById('hint');
   const pageTag = document.getElementById('pageTag');
   const focusPageTag = document.getElementById('focusPageTag');
   const rotText = document.getElementById('rotText');
@@ -183,8 +182,6 @@
   let undoStack = [];
   let editorMode = null; // {x,y,target}
   let touchSwipe = null;
-  let pinchZoom = null;
-  let viewScale = 1;
 
   function make(tag, attrs = {}){
     const el = document.createElementNS(SVG_NS, tag);
@@ -271,8 +268,6 @@
   function nextPageOrCreate(){ currentPage < pages.length-1 ? switchPage(currentPage+1) : addPage(true); }
   function prevPage(){ if(currentPage > 0) switchPage(currentPage - 1); }
 
-  function applyZoom(){ sheetWrap.style.transform = `scale(${viewScale})`; }
-
   function isFinger(evt){ return evt.pointerType === 'touch'; }
   function canWrite(evt){ return evt.pointerType === 'pen' || evt.pointerType === 'mouse' || evt.pointerType === ''; }
   function canText(evt){ return evt.pointerType === 'touch' || canWrite(evt); }
@@ -284,8 +279,8 @@
     const r = sheet.getBoundingClientRect();
     return { x: (x/VIEW_W)*r.width, y: (y/VIEW_H)*r.height };
   }
-  function snapY(y){
-    if(!snapInput.checked) return y;
+  function snapY(y, overlayOffset = 0){
+    if(!snapInput.checked) return y + overlayOffset;
     let best = y, dist = Infinity;
     for(const s of STAFF_LINES){
       const d = Math.abs(s - y);
@@ -294,7 +289,18 @@
         best = s;
       }
     }
-    return dist <= 38 ? best : y;
+    return dist <= 38 ? (best + overlayOffset) : (y + overlayOffset);
+  }
+
+  function getOverlayOffset(type){
+    switch(type){
+      case 'circle': return 0;
+      case 'xmark': return 0;
+      case 'bar': return 0;
+      case 'text': return -2;
+      case 'digit': return -2;
+      default: return 0;
+    }
   }
   function pushUndo(skipCurrentSave=false){
     if(!skipCurrentSave) saveCurrentPage();
@@ -336,14 +342,14 @@
     setTransform(g); return g;
   }
   function createCircle(x,y){
-    y = snapY(y);
+    y = snapY(y, getOverlayOffset('circle'));
     const g = baseObject('circle', x, y);
     const r = BASE_NOTE/2;
     g.appendChild(make('circle', {cx:0, cy:0, r, fill:colorInput.value, stroke:'none'}));
     return g;
   }
   function createX(x,y){
-    y = snapY(y);
+    y = snapY(y, getOverlayOffset('circle'));
     const g = baseObject('xmark', x, y), a = BASE_NOTE/2;
     const common = {stroke:colorInput.value, 'stroke-width':3.1, 'stroke-linecap':'round', 'vector-effect':'non-scaling-stroke'};
     g.appendChild(make('line', {...common, x1:-a, y1:-a, x2:a, y2:a}));
@@ -351,13 +357,13 @@
     return g;
   }
   function createBar(x,y){
-    y = snapY(y);
+    y = snapY(y, getOverlayOffset('circle'));
     const g = baseObject('bar', x, y);
     g.appendChild(make('line', {x1:0, y1:-BASE_NOTE*0.95, x2:0, y2:BASE_NOTE*0.95, stroke:colorInput.value, 'stroke-width':4, 'stroke-linecap':'round', 'vector-effect':'non-scaling-stroke'}));
     return g;
   }
   function createTextObject(x,y,text, digit=false){
-    y = snapY(y);
+    y = snapY(y, getOverlayOffset('circle'));
     const g = baseObject(digit ? 'digit' : 'text', x, y);
     const fontSize = digit ? BASE_FONT : 30;
     const t = make('text', {x:0, y:0, fill:colorInput.value, 'font-family':'Arial, Helvetica, sans-serif', 'font-size':fontSize, 'font-weight':'700', 'text-anchor':'middle', 'dominant-baseline':'middle'});
@@ -484,8 +490,7 @@
 
     evt.preventDefault();
     if(currentTool === 'erase'){
-      if(selected && evt.target.closest && evt.target.closest('.selection')){ beginDrag(evt, selected); return; }
-    if(obj){ pushUndo(); obj.remove(); deselect(); saveAll(); }
+      if(obj){ pushUndo(); obj.remove(); deselect(); saveAll(); }
       return;
     }
     if(obj){
@@ -516,8 +521,7 @@
     } else if(drag.mode === 'rotate'){
       const a0 = Math.atan2(drag.start.y - drag.cy, drag.start.x - drag.cx);
       const a1 = Math.atan2(p.y - drag.cy, p.x - drag.cx);
-      const angle = drag.or + (a1-a0) * 180 / Math.PI;
-      selected.dataset.rot = String(Math.round(angle / 90) * 90);
+      selected.dataset.rot = String(drag.or + (a1-a0) * 180 / Math.PI);
     }
     setTransform(selected); renderSelection(); updateRotText();
   }, {passive:false});
@@ -542,8 +546,8 @@
   document.getElementById('editText').addEventListener('click', () => {
     if(isTextObject(selected)) openTextEditor(Number(selected.dataset.x || 0), Number(selected.dataset.y || 0), selected);
   });
-  document.getElementById('rotLeft').addEventListener('click', () => rotateSelected(-90));
-  document.getElementById('rotRight').addEventListener('click', () => rotateSelected(90));
+  document.getElementById('rotLeft').addEventListener('click', () => rotateSelected(-15));
+  document.getElementById('rotRight').addEventListener('click', () => rotateSelected(15));
   document.getElementById('undo').addEventListener('click', restoreUndo);
   document.getElementById('clearPage').addEventListener('click', () => {
     if(!objectsLayer.children.length) return;
@@ -564,33 +568,8 @@
     if(evt.key === 'Escape' && body.classList.contains('focusMode')) setFocusMode(false);
     if(!selected || textEditor.style.display === 'block') return;
     if(evt.key === 'Delete' || evt.key === 'Backspace'){ pushUndo(); selected.remove(); deselect(); saveAll(); }
-    if(evt.key === '[') rotateSelected(-90);
-    if(evt.key === ']') rotateSelected(90);
-  });
-
-
-  workspace.addEventListener('touchstart', evt => {
-    if(evt.touches.length === 2){
-      const [a,b] = evt.touches;
-      pinchZoom = {
-        startDist: Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY),
-        startScale: viewScale
-      };
-    }
-  }, {passive:false});
-
-  workspace.addEventListener('touchmove', evt => {
-    if(evt.touches.length === 2 && pinchZoom){
-      evt.preventDefault();
-      const [a,b] = evt.touches;
-      const dist = Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
-      viewScale = Math.max(0.6, Math.min(3, pinchZoom.startScale * (dist / pinchZoom.startDist)));
-      applyZoom();
-    }
-  }, {passive:false});
-
-  workspace.addEventListener('touchend', evt => {
-    if(evt.touches.length < 2) pinchZoom = null;
+    if(evt.key === '[') rotateSelected(-5);
+    if(evt.key === ']') rotateSelected(5);
   });
 
   async function setFocusMode(on){
