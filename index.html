@@ -21,6 +21,18 @@
   }
   .toolbar::-webkit-scrollbar{height:5px;}
   .toolbar::-webkit-scrollbar-thumb{background:#4b5563; border-radius:999px;}
+  /* Modal de hojas */
+  .pagesModal{display:none; position:fixed; inset:0; z-index:80; background:rgba(0,0,0,.55); align-items:center; justify-content:center;}
+  .pagesModal.open{display:flex;}
+  .pagesModalBox{background:#1e293b; color:#f1f5f9; border-radius:14px; padding:18px; min-width:280px; max-width:360px; box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  .pagesModalBox h3{margin:0 0 12px; font-size:15px; color:#bfdbfe;}
+  .pagesModalList{list-style:none; padding:0; margin:0 0 12px; max-height:320px; overflow-y:auto;}
+  .pagesModalList li{display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:8px; cursor:pointer; font-size:13px;}
+  .pagesModalList li:hover{background:rgba(255,255,255,.08);}
+  .pagesModalList li.current{background:rgba(96,165,250,.2); font-weight:700; color:#bfdbfe;}
+  .pagesModalList li span.pg-num{min-width:28px; font-size:11px; color:#94a3b8;}
+  .pagesModalList li span.pg-preview{flex:1;}
+  .pagesModalClose{width:100%; border:0; border-radius:8px; padding:8px; background:#334155; color:#f1f5f9; cursor:pointer; font-size:13px; font-weight:700;}
   .toolgroup{display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,.075); padding:3px 4px; border-radius:10px; height:36px; flex:0 0 auto;}
   button,.fakeButton{
     border:0; border-radius:8px; padding:5px 8px; cursor:pointer; background:#f3f4f6; color:#111827;
@@ -76,8 +88,6 @@
     .sheet{box-shadow:none; border-radius:0;}
   }
 </style>
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#000000">
 </head>
 <body>
   <div class="toolbar" id="toolbar">
@@ -108,9 +118,11 @@
     </div>
     <div class="toolgroup">
       <button id="prevPage" title="Hoja anterior">◀</button>
-      <span class="pageTag" id="pageTag">Hoja 1/1</span><span class="mini" id="totalPages">Total: 1 hojas</span>
+      <span class="pageTag" id="pageTag">Hoja 1/1</span>
       <button id="nextPage" title="Hoja siguiente; si estás al final crea otra">▶</button>
-      <button id="addPage" title="Agregar hoja con el mismo fondo">+ Hoja</button><button id="deletePage" class="danger" title="Eliminar hoja actual">− Hoja</button>
+      <button id="addPage" title="Agregar hoja con el mismo fondo">+ Hoja</button>
+      <button id="deletePage" class="danger" title="Eliminar la hoja actual">✕ Hoja</button>
+      <button id="listPages" class="primary" title="Ver listado de hojas">📋 Hojas</button>
       <button id="focusMode" title="Ver solo hoja completa y pasar hojas con el dedo">Pantalla</button>
     </div>
     <div class="toolgroup">
@@ -137,6 +149,14 @@
     </div>
   </div>
   <div class="floatHud" id="floatHud"><button id="focusPrev">◀</button><span id="focusPageTag">Hoja 1/1</span><button id="focusNext">▶</button><button id="exitFocus">Salir</button></div>
+  <!-- Modal listado de hojas -->
+  <div class="pagesModal" id="pagesModal">
+    <div class="pagesModalBox">
+      <h3 id="pagesModalTitle">Hojas</h3>
+      <ul class="pagesModalList" id="pagesModalList"></ul>
+      <button class="pagesModalClose" id="pagesModalClose">Cerrar</button>
+    </div>
+  </div>
 <script>
 (() => {
   'use strict';
@@ -147,7 +167,8 @@
   const BASE_NOTE = 22;
   const BASE_FONT = 25;
   const STAFF_SPACES = [140.75,165.5,190.5,215.25,347.5,372.25,396.75,421.5,560.0,585.0,609.75,634.25,782.75,807.25,832.0,856.75,991.0,1015.5,1040.5,1065.5,1194.75,1220.0,1245.25,1269.5,1410.0,1434.75,1459.75,1484.5,1613.0,1638.0,1662.75,1687.25,1820.75,1845.25,1870.25,1895.0];
-  const STAFF_LINES = STAFF_SPACES.map(s => s - 12.4);
+  // Posiciones de las 5 líneas de cada pentagrama (para colocar símbolos SOBRE la línea)
+  const STAFF_LINES = [128.33,153.12,178.0,202.88,227.67,335.17,359.88,384.5,409.12,433.83,547.62,572.5,597.38,622.0,646.62,770.42,795.0,819.62,844.38,869.08,978.58,1003.25,1028.0,1053.0,1077.92,1182.29,1207.38,1232.62,1257.38,1281.96,1397.58,1422.38,1447.25,1472.12,1496.92,1600.62,1625.5,1650.38,1675.0,1699.62,1808.38,1833.0,1857.75,1882.62,1907.38];
   const STORAGE_KEY = 'pentagrama_v4_pages';
   const STORAGE_PAGE = 'pentagrama_v4_current_page';
 
@@ -222,11 +243,6 @@
     const txt = `Hoja ${currentPage + 1}/${pages.length}`;
     pageTag.textContent = txt;
     focusPageTag.textContent = txt;
-
-    const total = document.getElementById('totalPages');
-    if(total){
-      total.textContent = `Total: ${pages.length} hoja${pages.length !== 1 ? 's' : ''}`;
-    }
   }
   function renderPage(doSave=true){
     if(doSave) saveCurrentPage();
@@ -250,21 +266,6 @@
     pushUndo(true);
     saveAll();
   }
-
-  function deleteCurrentPage(){
-    if(pages.length === 1){
-      pages[0] = {html:''};
-      currentPage = 0;
-    } else {
-      pages.splice(currentPage, 1);
-      if(currentPage >= pages.length){
-        currentPage = pages.length - 1;
-      }
-    }
-    renderPage(false);
-    pushUndo(true);
-    saveAll();
-  }
   function nextPageOrCreate(){ currentPage < pages.length-1 ? switchPage(currentPage+1) : addPage(true); }
   function prevPage(){ if(currentPage > 0) switchPage(currentPage - 1); }
 
@@ -279,28 +280,11 @@
     const r = sheet.getBoundingClientRect();
     return { x: (x/VIEW_W)*r.width, y: (y/VIEW_H)*r.height };
   }
-  function snapY(y, overlayOffset = 0){
-    if(!snapInput.checked) return y + overlayOffset;
+  function snapY(y){
+    if(!snapInput.checked) return y;
     let best = y, dist = Infinity;
-    for(const s of STAFF_LINES){
-      const d = Math.abs(s - y);
-      if(d < dist){
-        dist = d;
-        best = s;
-      }
-    }
-    return dist <= 38 ? (best + overlayOffset) : (y + overlayOffset);
-  }
-
-  function getOverlayOffset(type){
-    switch(type){
-      case 'circle': return 0;
-      case 'xmark': return 0;
-      case 'bar': return 0;
-      case 'text': return -2;
-      case 'digit': return -2;
-      default: return 0;
-    }
+    for(const s of STAFF_LINES){ const d = Math.abs(s-y); if(d < dist){dist=d; best=s;} }
+    return dist <= 38 ? best : y;
   }
   function pushUndo(skipCurrentSave=false){
     if(!skipCurrentSave) saveCurrentPage();
@@ -342,14 +326,14 @@
     setTransform(g); return g;
   }
   function createCircle(x,y){
-    y = snapY(y, getOverlayOffset('circle'));
+    y = snapY(y);
     const g = baseObject('circle', x, y);
     const r = BASE_NOTE/2;
     g.appendChild(make('circle', {cx:0, cy:0, r, fill:colorInput.value, stroke:'none'}));
     return g;
   }
   function createX(x,y){
-    y = snapY(y, getOverlayOffset('circle'));
+    y = snapY(y);
     const g = baseObject('xmark', x, y), a = BASE_NOTE/2;
     const common = {stroke:colorInput.value, 'stroke-width':3.1, 'stroke-linecap':'round', 'vector-effect':'non-scaling-stroke'};
     g.appendChild(make('line', {...common, x1:-a, y1:-a, x2:a, y2:a}));
@@ -357,13 +341,13 @@
     return g;
   }
   function createBar(x,y){
-    y = snapY(y, getOverlayOffset('circle'));
+    y = snapY(y);
     const g = baseObject('bar', x, y);
     g.appendChild(make('line', {x1:0, y1:-BASE_NOTE*0.95, x2:0, y2:BASE_NOTE*0.95, stroke:colorInput.value, 'stroke-width':4, 'stroke-linecap':'round', 'vector-effect':'non-scaling-stroke'}));
     return g;
   }
   function createTextObject(x,y,text, digit=false){
-    y = snapY(y, getOverlayOffset('circle'));
+    y = snapY(y);
     const g = baseObject(digit ? 'digit' : 'text', x, y);
     const fontSize = digit ? BASE_FONT : 30;
     const t = make('text', {x:0, y:0, fill:colorInput.value, 'font-family':'Arial, Helvetica, sans-serif', 'font-size':fontSize, 'font-weight':'700', 'text-anchor':'middle', 'dominant-baseline':'middle'});
@@ -557,8 +541,41 @@
   document.getElementById('nextPage').addEventListener('click', nextPageOrCreate);
   document.getElementById('addPage').addEventListener('click', () => addPage(true));
   document.getElementById('deletePage').addEventListener('click', () => {
-    const ok = confirm('¿Deseas eliminar esta hoja?');
-    if(ok) deleteCurrentPage();
+    if(pages.length === 1){
+      if(confirm('¿Borrar el contenido de la única hoja?')){ pushUndo(); objectsLayer.innerHTML=''; deselect(); saveAll(); }
+      return;
+    }
+    if(confirm(`¿Eliminar la hoja ${currentPage+1}? Esta acción no se puede deshacer con ↶.`)){
+      saveCurrentPage();
+      pages.splice(currentPage, 1);
+      currentPage = Math.min(currentPage, pages.length - 1);
+      renderPage(false);
+      saveAll();
+    }
+  });
+  document.getElementById('listPages').addEventListener('click', () => {
+    saveCurrentPage();
+    const modal = document.getElementById('pagesModal');
+    const list = document.getElementById('pagesModalList');
+    const title = document.getElementById('pagesModalTitle');
+    title.textContent = `Hojas (${pages.length} total)`;
+    list.innerHTML = '';
+    pages.forEach((p, i) => {
+      const li = document.createElement('li');
+      if(i === currentPage) li.classList.add('current');
+      const hasContent = p.html && p.html.trim().length > 0;
+      li.innerHTML = `<span class="pg-num">${i+1}</span><span class="pg-preview">${hasContent ? '🎵 Con contenido' : '— Vacía'}</span>${i===currentPage?'<span style="color:#60a5fa;font-size:11px">← actual</span>':''}`;
+      li.addEventListener('click', () => { switchPage(i); modal.classList.remove('open'); });
+      list.appendChild(li);
+    });
+    modal.classList.add('open');
+  });
+  document.getElementById('pagesModalClose').addEventListener('click', () => {
+    document.getElementById('pagesModal').classList.remove('open');
+  });
+  document.getElementById('pagesModal').addEventListener('click', e => {
+    if(e.target === document.getElementById('pagesModal'))
+      document.getElementById('pagesModal').classList.remove('open');
   });
   document.getElementById('focusPrev').addEventListener('click', prevPage);
   document.getElementById('focusNext').addEventListener('click', nextPageOrCreate);
@@ -665,65 +682,5 @@
   setTool('select');
 })();
 </script>
-
-<style>
-#installAppBtn{
-position:fixed;
-right:18px;
-bottom:18px;
-z-index:9999;
-padding:12px 18px;
-border:none;
-border-radius:14px;
-background:#111;
-color:white;
-font-weight:bold;
-cursor:pointer;
-box-shadow:0 4px 12px rgba(0,0,0,.4);
-}
-#installAppBtn:hover{
-transform:scale(1.03);
-}
-</style>
-
-<button id="installAppBtn" style="display:none;">📲 Instalar App</button>
-
-<script>
-let deferredPrompt = null;
-const installBtn = document.getElementById('installAppBtn');
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-
-  if (!window.matchMedia('(display-mode: standalone)').matches) {
-    installBtn.style.display = 'block';
-  }
-});
-
-installBtn.addEventListener('click', async () => {
-  if (!deferredPrompt) return;
-
-  deferredPrompt.prompt();
-  const result = await deferredPrompt.userChoice;
-
-  if(result.outcome === 'accepted'){
-    installBtn.style.display = 'none';
-  }
-
-  deferredPrompt = null;
-});
-
-window.addEventListener('appinstalled', () => {
-  installBtn.style.display = 'none';
-});
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js');
-  });
-}
-</script>
 </body>
-
 </html>
