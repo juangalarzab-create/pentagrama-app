@@ -3,15 +3,29 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-<title>Canvas Pentagrama Inteligente v4</title>
+<meta name="theme-color" content="#111827" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Pentagrama" />
+<link rel="manifest" id="pwaManifestLink" />
+<title>Pentagrama App</title>
 <style>
   :root{
     --panel:#0b1220; --panel2:#111827; --accent:#2563eb; --white:#fff;
-    --toolbar-h:46px; --hint-h:26px;
+    --toolbar-h:46px; --hint-h:0px;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{height:100%; margin:0; font-family:Arial, Helvetica, sans-serif; background:#cfd3dc; color:#111827; overflow:hidden;}
   body{display:flex; flex-direction:column;}
+  /* Botón instalar PWA */
+  #installBtn{
+    position:fixed; bottom:18px; right:18px; z-index:100;
+    background:#2563eb; color:#fff; border:0; border-radius:999px;
+    padding:10px 18px; font-size:13px; font-weight:800; cursor:pointer;
+    box-shadow:0 4px 18px rgba(37,99,235,.5); display:none; align-items:center; gap:7px;
+  }
+  #installBtn.show{display:flex;}
   .toolbar{
     height:var(--toolbar-h); min-height:var(--toolbar-h); width:100%;
     background:linear-gradient(180deg,#111827,#07111f); color:#fff;
@@ -50,9 +64,15 @@
   input[type="checkbox"]{width:14px;height:14px; accent-color:#60a5fa;}
   .mini{font-size:11px; color:#e5e7eb; opacity:.95; padding:0 2px;}
   .pageTag{font-size:12px; font-weight:800; color:#e5e7eb; min-width:62px; text-align:center;}
-  .hint{height:var(--hint-h); min-height:var(--hint-h); display:flex; align-items:center; justify-content:center; font-size:12px; color:#111827; background:#eef2ff; padding:3px 8px; text-align:center; z-index:5;}
+  .hint{display:none;}
   .workspace{flex:1; overflow:hidden; padding:4px; display:flex; justify-content:center; align-items:center; touch-action:none; user-select:none;}
-  .sheetWrap{position:relative; width:min(calc((100vh - var(--toolbar-h) - var(--hint-h) - 10px) * 210 / 297), calc(100vw - 10px)); aspect-ratio:210/297;}
+  .sheetWrap{
+    position:relative;
+    width:min(calc((100vh - var(--toolbar-h) - 10px) * 210 / 297), calc(100vw - 10px));
+    aspect-ratio:210/297;
+    transform-origin:center center;
+    transition:transform 0.05s linear;
+  }
   .sheet{
     position:absolute; inset:0; background:#fff center/100% 100% no-repeat; box-shadow:0 12px 35px rgba(0,0,0,.28);
     border-radius:2px; overflow:hidden; touch-action:none;
@@ -76,7 +96,7 @@
   body.focusMode{background:#111827;}
   body.focusMode .toolbar, body.focusMode .hint{display:none !important;}
   body.focusMode .workspace{padding:0; background:#111827;}
-  body.focusMode .sheetWrap{width:min(100vw, calc(100vh * 210 / 297)); max-height:100vh;}
+  body.focusMode .sheetWrap{width:min(100vw, calc(100vh * 210 / 297)); max-height:100vh; transform:none;}
   body.focusMode .sheet{box-shadow:none; border-radius:0;}
   body.focusMode .floatHud{display:flex; opacity:.3;}
   body.focusMode .floatHud:hover{opacity:1;}
@@ -102,6 +122,7 @@
       <button data-tool="digit4" title="Número 4">4</button>
       <button data-tool="digit6" title="Número 6">6</button>
       <button data-tool="digit8" title="Número 8">8</button>
+      <button id="undo" title="Deshacer">↶</button>
       <button class="danger" data-tool="erase" title="Borrar objeto con lápiz/mouse">⌫</button>
     </div>
     <div class="toolgroup">
@@ -126,7 +147,6 @@
       <button id="focusMode" title="Ver solo hoja completa y pasar hojas con el dedo">Pantalla</button>
     </div>
     <div class="toolgroup">
-      <button id="undo" title="Deshacer">↶</button>
       <button id="clearPage" class="danger" title="Borrar la hoja actual">Limpiar</button>
       <button id="exportPng" class="primary" title="Exportar hoja actual como PNG">PNG</button>
       <button id="exportPdf" class="primary" title="Exportar hoja actual como PDF">PDF</button>
@@ -157,6 +177,8 @@
       <button class="pagesModalClose" id="pagesModalClose">Cerrar</button>
     </div>
   </div>
+  <!-- Botón instalar PWA -->
+  <button id="installBtn">⬇ Instalar App</button>
 <script>
 (() => {
   'use strict';
@@ -284,7 +306,7 @@
     if(!snapInput.checked) return y;
     let best = y, dist = Infinity;
     for(const s of STAFF_LINES){ const d = Math.abs(s-y); if(d < dist){dist=d; best=s;} }
-    return dist <= 38 ? best : y;
+    return dist <= 50 ? best : y;
   }
   function pushUndo(skipCurrentSave=false){
     if(!skipCurrentSave) saveCurrentPage();
@@ -439,6 +461,16 @@
     else if(currentTool === 'bar') addObject(createBar(p.x,p.y));
     else if(digitMatch) addObject(createTextObject(p.x,p.y,digitMatch[1],true));
   }
+  // ── Zoom con pellizco (solo dedos) ──────────────────────────────────
+  let pinch = null;
+  let zoomScale = 1;
+  let zoomTX = 0, zoomTY = 0;
+  function applyZoomTransform(){
+    sheetWrap.style.transform = `translate(${zoomTX}px,${zoomTY}px) scale(${zoomScale})`;
+  }
+  function getPointerDist(a,b){ return Math.hypot(b.clientX-a.clientX, b.clientY-a.clientY); }
+  function getMidPoint(a,b){ return {x:(a.clientX+b.clientX)/2, y:(a.clientY+b.clientY)/2}; }
+
   function beginDrag(evt, obj){
     if(!canWrite(evt)) return;
     pushUndo();
@@ -449,34 +481,81 @@
     const rot = Number(selected.dataset.rot || 0);
     const bcx = x + (box.x + box.width/2) * scale;
     const bcy = y + (box.y + box.height/2) * scale;
-    // Detecta si el lápiz está cerca de la esquina inferior derecha para redimensionar o del punto superior para girar.
-    const brx = x + (box.x + box.width + 12) * scale, bry = y + (box.y + box.height + 12) * scale;
-    const rhx = x + (box.x + box.width/2) * scale, rhy = y + (box.y - 30) * scale;
+    // Handle positions in SVG space
+    const brx = x + (box.x + box.width + 12) * scale;
+    const bry = y + (box.y + box.height + 12) * scale;
+    const rhx = x + (box.x + box.width/2) * scale;
+    const rhy = y + (box.y - 30) * scale;
     const distResize = Math.hypot(p.x - brx, p.y - bry);
     const distRotate = Math.hypot(p.x - rhx, p.y - rhy);
+    // Larger hit area for handles (50px in SVG space)
     let mode = 'move';
-    if(distResize < 40) mode = 'resize';
-    if(distRotate < 40) mode = 'rotate';
+    if(distResize < 50) mode = 'resize';
+    if(distRotate < 50) mode = 'rotate';
     drag = {mode, start:p, ox:x, oy:y, os:scale, or:rot, cx:bcx, cy:bcy};
     board.setPointerCapture?.(evt.pointerId);
   }
 
+  // Track active touch pointers for pinch
+  const activePointers = new Map();
+
   board.addEventListener('pointerdown', evt => {
     if(textEditor.style.display === 'block' && !textEditor.contains(evt.target)) closeEditor();
-    const obj = objectFromTarget(evt.target);
 
     if(isFinger(evt)){
+      activePointers.set(evt.pointerId, evt);
+      // Pinch zoom with 2 fingers
+      if(activePointers.size === 2){
+        const pts = [...activePointers.values()];
+        pinch = {
+          dist: getPointerDist(pts[0], pts[1]),
+          mid: getMidPoint(pts[0], pts[1]),
+          startScale: zoomScale,
+          startTX: zoomTX,
+          startTY: zoomTY
+        };
+        touchSwipe = null;
+        return;
+      }
+      // Single finger
       touchSwipe = {x:evt.clientX, y:evt.clientY, t:Date.now(), moved:false};
+      const obj = objectFromTarget(evt.target);
       if(currentTool === 'text' && !obj){ handleCreateAt(evt); }
       else deselect(false);
       return;
     }
 
     evt.preventDefault();
+    const obj = objectFromTarget(evt.target);
     if(currentTool === 'erase'){
       if(obj){ pushUndo(); obj.remove(); deselect(); saveAll(); }
       return;
     }
+
+    // Check if clicking on a selection handle FIRST (before checking object)
+    if(selected){
+      const p = pointFromEvent(evt);
+      const box = selected.getBBox();
+      const x = Number(selected.dataset.x||0), y = Number(selected.dataset.y||0), scale = Number(selected.dataset.scale||1);
+      const rot = Number(selected.dataset.rot||0);
+      const bcx = x + (box.x + box.width/2)*scale;
+      const bcy = y + (box.y + box.height/2)*scale;
+      const brx = x + (box.x + box.width+12)*scale;
+      const bry = y + (box.y + box.height+12)*scale;
+      const rhx = x + (box.x + box.width/2)*scale;
+      const rhy = y + (box.y - 30)*scale;
+      const distResize = Math.hypot(p.x-brx, p.y-bry);
+      const distRotate = Math.hypot(p.x-rhx, p.y-rhy);
+      if(distResize < 50 || distRotate < 50){
+        // Clicked a handle — drag without re-selecting
+        pushUndo();
+        const mode = distResize < 50 ? 'resize' : 'rotate';
+        drag = {mode, start:p, ox:x, oy:y, os:scale, or:rot, cx:bcx, cy:bcy};
+        board.setPointerCapture?.(evt.pointerId);
+        return;
+      }
+    }
+
     if(obj){
       if(currentTool === 'text' && isTextObject(obj)){ openTextEditor(Number(obj.dataset.x || 0), Number(obj.dataset.y || 0), obj); return; }
       beginDrag(evt, obj);
@@ -487,9 +566,24 @@
   }, {passive:false});
 
   board.addEventListener('pointermove', evt => {
-    if(isFinger(evt) && touchSwipe){
-      const dx = evt.clientX - touchSwipe.x, dy = evt.clientY - touchSwipe.y;
-      if(Math.hypot(dx,dy) > 12) touchSwipe.moved = true;
+    if(isFinger(evt)){
+      activePointers.set(evt.pointerId, evt);
+      if(pinch && activePointers.size === 2){
+        const pts = [...activePointers.values()];
+        const newDist = getPointerDist(pts[0], pts[1]);
+        const newMid = getMidPoint(pts[0], pts[1]);
+        const ratio = newDist / pinch.dist;
+        zoomScale = Math.max(0.4, Math.min(5, pinch.startScale * ratio));
+        // Pan with mid-point delta
+        zoomTX = pinch.startTX + (newMid.x - pinch.mid.x);
+        zoomTY = pinch.startTY + (newMid.y - pinch.mid.y);
+        applyZoomTransform();
+        return;
+      }
+      if(touchSwipe){
+        const dx = evt.clientX - touchSwipe.x, dy = evt.clientY - touchSwipe.y;
+        if(Math.hypot(dx,dy) > 12) touchSwipe.moved = true;
+      }
       return;
     }
     if(!drag || !selected) return;
@@ -511,17 +605,28 @@
   }, {passive:false});
 
   board.addEventListener('pointerup', evt => {
-    if(isFinger(evt) && touchSwipe){
-      const dx = evt.clientX - touchSwipe.x, dy = evt.clientY - touchSwipe.y;
-      if(Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)*1.25){
-        if(dx < 0) nextPageOrCreate(); else prevPage();
+    if(isFinger(evt)){
+      activePointers.delete(evt.pointerId);
+      if(pinch && activePointers.size < 2){
+        pinch = null;
+        touchSwipe = null;
+        return;
       }
-      touchSwipe = null;
+      if(touchSwipe){
+        const dx = evt.clientX - touchSwipe.x, dy = evt.clientY - touchSwipe.y;
+        if(Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)*1.25){
+          if(dx < 0) nextPageOrCreate(); else prevPage();
+        }
+        touchSwipe = null;
+      }
       return;
     }
     if(drag){ drag = null; saveAll(); }
   });
-  board.addEventListener('pointercancel', () => { drag = null; touchSwipe = null; });
+  board.addEventListener('pointercancel', evt => {
+    activePointers.delete(evt.pointerId);
+    drag = null; touchSwipe = null; pinch = null;
+  });
   board.addEventListener('dblclick', evt => {
     const obj = objectFromTarget(evt.target);
     if(isTextObject(obj)) openTextEditor(Number(obj.dataset.x || 0), Number(obj.dataset.y || 0), obj);
@@ -530,8 +635,8 @@
   document.getElementById('editText').addEventListener('click', () => {
     if(isTextObject(selected)) openTextEditor(Number(selected.dataset.x || 0), Number(selected.dataset.y || 0), selected);
   });
-  document.getElementById('rotLeft').addEventListener('click', () => rotateSelected(-15));
-  document.getElementById('rotRight').addEventListener('click', () => rotateSelected(15));
+  document.getElementById('rotLeft').addEventListener('click', () => rotateSelected(-90));
+  document.getElementById('rotRight').addEventListener('click', () => rotateSelected(90));
   document.getElementById('undo').addEventListener('click', restoreUndo);
   document.getElementById('clearPage').addEventListener('click', () => {
     if(!objectsLayer.children.length) return;
@@ -675,6 +780,61 @@
     addString(`trailer\n<< /Size ${id} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`);
     return new Blob(chunks, {type:'application/pdf'});
   }
+
+  // Doble toque en workspace (no en la hoja) para resetear zoom
+  let lastWsTap = 0;
+  workspace.addEventListener('dblclick', () => {
+    zoomScale = 1; zoomTX = 0; zoomTY = 0; applyZoomTransform();
+  });
+  workspace.addEventListener('touchend', e => {
+    const now = Date.now();
+    if(now - lastWsTap < 320 && e.target === workspace){
+      zoomScale = 1; zoomTX = 0; zoomTY = 0; applyZoomTransform();
+    }
+    lastWsTap = now;
+  });
+  (function setupPWA(){
+    // Crear manifest dinámico como blob
+    const manifest = {
+      name: 'Pentagrama App',
+      short_name: 'Pentagrama',
+      description: 'Canvas inteligente para pentagrama musical',
+      start_url: './',
+      display: 'standalone',
+      background_color: '#111827',
+      theme_color: '#111827',
+      icons: [
+        { src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%23111827"/><text x="256" y="340" font-size="280" text-anchor="middle" fill="%2360a5fa">♩</text></svg>', sizes: '512x512', type: 'image/svg+xml' }
+      ]
+    };
+    const blob = new Blob([JSON.stringify(manifest)], {type:'application/manifest+json'});
+    const url = URL.createObjectURL(blob);
+    document.getElementById('pwaManifestLink').href = url;
+
+    // Botón instalar
+    const installBtn = document.getElementById('installBtn');
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.classList.add('show');
+    });
+    installBtn.addEventListener('click', async () => {
+      if(!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const {outcome} = await deferredPrompt.userChoice;
+      if(outcome === 'accepted') installBtn.classList.remove('show');
+      deferredPrompt = null;
+    });
+    window.addEventListener('appinstalled', () => {
+      installBtn.classList.remove('show');
+      deferredPrompt = null;
+    });
+    // Si ya está instalado como PWA, ocultar
+    if(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone){
+      installBtn.classList.remove('show');
+    }
+  })();
 
   // Guarda antes de cerrar para no perder hojas.
   window.addEventListener('beforeunload', saveAll);
